@@ -146,6 +146,13 @@ func max(l, r uint64) uint64 {
 	return r
 }
 
+func min(l, r uint64) uint64 {
+	if l < r {
+		return l
+	}
+	return r
+}
+
 type CampaignType string
 
 const (

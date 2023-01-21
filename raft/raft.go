@@ -172,6 +172,7 @@ func (r *raft) becomeLeader() {
 	r.state = StateLeader
 
 	// 新上任的 leader 需要传一条空消息
+	r.appendEntry([]Entry{{Data: nil}}...)
 }
 
 func (r *raft) becomeFollower(term, lead uint64) {
@@ -267,7 +268,7 @@ func (r *raft) appendEntry(es ...Entry) {
 		es[i].Index = lastIndex + uint64(i) + 1
 	}
 	// 设置新增日志的 term 以及 index
-	r.raftLog.apend(es...)
+	r.raftLog.append(es...)
 	r.prs[r.id].maybeUpdate(r.raftLog.lastIndex())
 
 }

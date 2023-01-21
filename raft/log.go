@@ -7,6 +7,36 @@ type unstable struct {
 	offset uint64
 }
 
+func (u *unstable) mustCheckOutOfBounds(l, r uint64) {
+	if l > r {
+		panic("invalid unstable slice")
+	}
+
+	if l < u.offset || r > u.offset+uint64(len(u.entries)) {
+		panic("invalid unstable slice")
+	}
+}
+
+func (u *unstable) slice(l, r uint64) []Entry {
+	u.mustCheckOutOfBounds(l, r)
+	return u.entries[l-u.offset : r-u.offset]
+}
+
+// 在非持久化区域中传入 entries，可能导致原先数据的截断或者重叠追加
+func (u *unstable) truncateAndAppend(ents []Entry) {
+	after := ents[0].Index
+	switch {
+	case after == u.offset+uint64(len(u.entries)):
+		u.entries = append(u.entries, ents...)
+	case after <= u.offset:
+		u.offset = after
+		u.entries = ents
+	default:
+		u.entries = append([]Entry{}, u.slice(u.offset, after)...)
+		u.entries = append(u.entries, ents...)
+	}
+}
+
 func (u *unstable) maybeLastIndex() (uint64, bool) {
 	if l := len(u.entries); l != 0 {
 		return u.offset + uint64(l) - 1, true
@@ -91,20 +121,80 @@ func (r *raftLog) firstIndex() uint64 {
 	return index
 }
 
-func (r *raftLog) slice(left, right uint64) ([]Entry, error) {
-	return nil, nil
+func (r *raftLog) mustCheckOutOfBounds(lo, hi uint64) error {
+	if lo > hi {
+		panic("invalid raft log index")
+	}
+
+	fi := r.firstIndex()
+	if lo < fi {
+		panic("invalid raft log index")
+	}
+
+	if hi > r.lastIndex()+1 {
+		panic("invalid raft log index")
+	}
+
+	return nil
 }
 
-func (r *raftLog) apend(ents ...Entry) uint64 {
-	return 0
+func (r *raftLog) slice(lo, hi uint64) ([]Entry, error) {
+	r.mustCheckOutOfBounds(lo, hi)
+	if lo == hi {
+		return nil, nil
+	}
+
+	var ents []Entry
+	if lo < r.unstable.offset {
+		entries, err := r.storage.Entries(lo, min(r.unstable.offset, hi))
+		if err != nil {
+			panic(err)
+		}
+
+		ents = append(ents, entries...)
+	}
+
+	if hi > r.unstable.offset {
+		unstable := r.unstable.slice(max(lo, r.unstable.offset), hi)
+		ents = append(ents, unstable...)
+	}
+
+	return ents, nil
+}
+
+// 此处的 append 只能添加非持久化的日志
+func (r *raftLog) append(ents ...Entry) uint64 {
+	if len(ents) == 0 {
+		return r.lastIndex()
+	}
+
+	if after := ents[0].Index - 1; after < r.commitIndex {
+		panic("entry index less then commit index")
+	}
+
+	r.unstable.truncateAndAppend(ents)
+	return r.lastIndex()
 }
 
 func (r *raftLog) lastIndex() uint64 {
-	return 0
+	if i, ok := r.unstable.maybeLastIndex(); ok {
+		return i
+	}
+
+	i, err := r.storage.LastIndex()
+	if err != nil {
+		panic(err)
+	}
+
+	return i
 }
 
 func (r *raftLog) lastTerm() uint64 {
-	return 0
+	t, err := r.term(r.lastIndex())
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 // 数据是否新于自身
