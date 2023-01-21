@@ -4,21 +4,20 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
 	"xiaoxuxiansheng/my-raft/raft"
 )
 
 type service struct {
 	proposeC    chan<- string
 	confChangeC chan<- raft.ConfChange
-	commitC     <-chan *string
 	kvStore     *kvStore
 }
 
-func newService(kvStore *kvStore, proposeC chan<- string, confChangeC chan<- raft.ConfChange, commitC <-chan *string) *service {
+func newService(kvStore *kvStore, proposeC chan<- string, confChangeC chan<- raft.ConfChange) *service {
 	return &service{
 		proposeC:    proposeC,
 		confChangeC: confChangeC,
-		commitC:     commitC,
 		kvStore:     kvStore,
 	}
 }

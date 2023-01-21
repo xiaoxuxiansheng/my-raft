@@ -44,7 +44,7 @@ func newRaftProxy(id uint64, peers []string, proposeC <-chan string, confChangeC
 func (r *raftProxy) run() {
 	peers := make([]raft.Peer, 0, len(r.peers))
 	for i := range r.peers {
-		peers[i] = raft.Peer{ID: uint64(i + 1)}
+		peers = append(peers, raft.Peer{ID: uint64(i + 1)})
 	}
 
 	c := raft.Config{

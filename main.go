@@ -3,7 +3,6 @@ package main
 import "xiaoxuxiansheng/my-raft/raft"
 
 func main() {
-
 	// 用于提交写请求的 chan
 	proposeC := make(chan string)
 	// 用于提交配置变更的 chan
@@ -15,6 +14,6 @@ func main() {
 	kvStore := newKVStore(proposeC, commitC)
 
 	// 启动 http 服务
-	s := newService(kvStore, proposeC, confChangeC, commitC)
+	s := newService(kvStore, proposeC, confChangeC)
 	serveHTTPAPI(8091, s)
 }
