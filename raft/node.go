@@ -22,7 +22,6 @@ type Node struct {
 
 func StartNode(conf *Config, peers []Peer) Node {
 	r := newRaft(conf)
-	r.becomeFollower(1, None)
 	// 将所有节点添加到配置中
 	// for _, peer := range peers {
 
@@ -30,9 +29,9 @@ func StartNode(conf *Config, peers []Peer) Node {
 	r.raftLog.commitIndex = r.raftLog.lastIndex()
 
 	// 添加各节点状态信息
-	for _, peer := range peers {
-		r.addNode(peer.ID)
-	}
+	// for _, peer := range peers {
+	// 	r.addNode(peer.ID)
+	// }
 
 	n := newNode()
 	go n.run(r)
@@ -58,6 +57,9 @@ func (n *Node) run(r *raft) {
 		rd       Ready
 		prevSoft = r.softState()
 		prevHard = emptyHardState
+
+		prevLastUnstablei, prevLastUnstablet uint64
+		hasPrevLstUnstablei                  bool
 	)
 
 	for {
@@ -89,7 +91,35 @@ func (n *Node) run(r *raft) {
 			r.tick()
 			// 有数据需要投递
 		case readyc <- rd:
+			// 同步已经更新过的状态信息，用于下一轮循环判断是否数据是否有更新
+			if rd.SoftState != nil {
+				prevSoft = rd.SoftState
+			}
+
+			if !IsEmptyHardState(rd.HardState) {
+				prevHard = rd.HardState
+			}
+
+			if len(rd.Entries) > 0 {
+				prevLastUnstablei, prevLastUnstablet = rd.Entries[len(rd.Entries)-1].Index, rd.Entries[len(rd.Entries)-1].Term
+				hasPrevLstUnstablei = true
+			}
+
+			r.msgs = nil
+			r.readStates = nil
+			advancec = n.advancec
 		case <-advancec:
+			// 上一轮的 commit 视为已经应用了，因为只有这样应用层才会给予 advance
+			if prevHard.CommitIndex != 0 {
+				r.raftLog.appliedTo(prevHard.CommitIndex)
+			}
+
+			if hasPrevLstUnstablei {
+				r.raftLog.stableTo(prevLastUnstablei, prevLastUnstablet)
+				hasPrevLstUnstablei = false
+			}
+
+			advancec = nil
 		}
 	}
 }

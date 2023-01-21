@@ -61,6 +61,18 @@ func (u *unstable) maybeTerm(i uint64) (uint64, bool) {
 	return u.entries[i-u.offset].Term, true
 }
 
+func (u *unstable) stableTo(i, t uint64) {
+	gt, ok := u.maybeTerm(i)
+	if !ok {
+		return
+	}
+
+	if t == gt && i >= u.offset {
+		u.entries = u.entries[i-u.offset+1:]
+		u.offset = i + 1
+	}
+}
+
 type raftLog struct {
 	// 存储接口，提供了持久化日志的查询能力
 	storage Storage
@@ -94,6 +106,10 @@ func newRaftLog(storage Storage) *raftLog {
 	r.commitIndex = firstIndex - 1
 	r.applyIndex = firstIndex - 1
 	return &r
+}
+
+func (r *raftLog) stableTo(i, t uint64) {
+	r.unstable.stableTo(i, t)
 }
 
 func (r *raftLog) unstableEntries() []Entry {

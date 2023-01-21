@@ -77,7 +77,7 @@ func newRaft(conf *Config) *raft {
 	r.raftLog.appliedTo(conf.Applied)
 
 	// 启动变为 follower 状态
-	r.becomeFollower(r.Term, None)
+	r.becomeFollower(1, None)
 
 	return &r
 }
