@@ -66,7 +66,7 @@ type Message struct {
 	// 是否拒绝
 	Reject bool `json:"reject"`
 	// 拒绝同步日志时，最晚的日志索引
-	RejectHint uint `json:"rejectHint"`
+	RejectHint uint64 `json:"rejectHint"`
 	// 上下文
 	Context []byte `json:"context"`
 }

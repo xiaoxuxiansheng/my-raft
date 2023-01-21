@@ -24,3 +24,13 @@ func (pr *Progress) maybeUpdate(n uint64) bool {
 	}
 	return updated
 }
+
+func (pr *Progress) mayDecrTo(logIndex, rejectHint uint64) bool {
+	if pr.Next-1 != logIndex {
+		return false
+	}
+	if pr.Next = min(logIndex, rejectHint+1); pr.Next < 1 {
+		pr.Next = 1
+	}
+	return true
+}

@@ -1,6 +1,9 @@
 package raft
 
-import "math/rand"
+import (
+	"math/rand"
+	"sort"
+)
 
 type stepFunc func(*raft, Message)
 
@@ -161,29 +164,14 @@ func (r *raft) Step(m Message) error {
 	return nil
 }
 
-func (r *raft) becomeLeader() {
-	if r.state == StateFollower {
-		panic("invalid transition [follower -> leader]")
-	}
-	r.step = stepLeader
-	r.reset(r.Term)
-	r.tick = r.tickHeartbeat
-	r.lead = r.id
-	r.state = StateLeader
-
-	// 新上任的 leader 需要传一条空消息
-	r.appendEntry([]Entry{{Data: nil}}...)
-}
-
-func (r *raft) becomeFollower(term, lead uint64) {
-	r.reset(term)
-	r.step = stepFollower
-	r.tick = r.tickElection
-	r.lead = lead
-	r.state = StateFollower
-}
-
 func (r *raft) reset(term uint64) {
+	if r.Term != term {
+		r.Term = term
+		r.Vote = None
+	}
+	r.lead = None
+	r.electionElapsed = 0
+	r.heartbeatElapsed = 0
 	// 重置一下选举超时时间
 	r.resetRandomizedElectionTimeout()
 }
@@ -220,7 +208,61 @@ func (r *raft) send(m Message) {
 }
 
 func (r *raft) campaign(typ CampaignType) {
+	// 竞选实际上氛围 prevote 和 vote 两个阶段
+	var (
+		term    uint64
+		msgType MessageType
+	)
 
+	if typ == campaignPreElection {
+		// 预竞选的时候 raft 的 term 不会自增
+		r.becomePreCandidate()
+		term = r.Term + 1
+		msgType = MsgPreVote
+	} else {
+		// 竞选的时候 raft 的 term 会自增
+		r.becomeCandidate()
+		term = r.Term
+		msgType = MsgVote
+	}
+
+	// 作为候选人本身，先把票投给自己，然后检查一次是否达到多数派
+	if r.quorum() == r.poll(r.id, true) {
+		if typ == campaignPreElection {
+			r.campaign(campaignElection)
+		} else {
+			r.becomeLeader()
+		}
+		return
+	}
+
+	// 向集群所有节点进行拉票
+	for id := range r.prs {
+		// 自己无须发
+		if id == r.id {
+			continue
+		}
+
+		r.send(Message{Term: term, To: id, Type: msgType, LogTerm: r.raftLog.lastTerm(), LogIndex: r.raftLog.lastIndex()})
+	}
+}
+
+func (r *raft) poll(id uint64, v bool) int {
+	// 如果 id 还没有投票，则更新其投票状态
+	if _, ok := r.votes[id]; !ok {
+		r.votes[id] = v
+	}
+	var granted int
+	for _, vv := range r.votes {
+		if vv {
+			granted++
+		}
+	}
+	return granted
+}
+
+func (r *raft) quorum() int {
+	return len(r.prs)>>1 + 1
 }
 
 func (r *raft) tickElection() {
@@ -242,13 +284,6 @@ func (r *raft) tickHeartbeat() {
 		r.heartbeatElapsed = 0
 		r.Step(Message{From: r.id, Type: MsgBeat})
 	}
-}
-
-func stepLeader(r *raft, m Message) {
-
-}
-
-func stepFollower(r *raft, m Message) {
 }
 
 // 校验一个节点是否仍在集群中
@@ -274,5 +309,13 @@ func (r *raft) appendEntry(es ...Entry) {
 }
 
 func (r *raft) maybeCommit() bool {
-	return false
+	matches := make(uint64Slice, 0, len(r.prs))
+	for id := range r.prs {
+		matches = append(matches, r.prs[id].Match)
+	}
+
+	sort.Sort(sort.Reverse(matches))
+	mid := matches[r.quorum()-1]
+
+	return r.raftLog.maybeCommit(mid, r.Term)
 }

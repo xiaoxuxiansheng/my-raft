@@ -288,3 +288,42 @@ func (r *raftLog) zeroTermOnErrCompacted(t uint64, err error) uint64 {
 
 	panic(err)
 }
+
+func (r *raftLog) maybeAppend(logIndex, logTerm, commitIndex uint64, ents ...Entry) (uint64, bool) {
+	// 倘若前一条日志的 index 和 term 未命中，直接返回
+	if !r.matchTerm(logIndex, logTerm) {
+		return 0, false
+	}
+
+	// 找到第一笔不重复的日志，从那个部分开始追加
+	conflictStart := r.findConflict(ents)
+	if conflictStart <= r.commitIndex {
+		panic("conflict before commit index")
+	}
+	offset := logIndex + 1
+	r.append(ents[conflictStart-offset:]...)
+
+	// 更新已提交的 commit index
+	lastNewI := logIndex + uint64(len(ents))
+	r.commitTo(min(commitIndex, lastNewI))
+	return lastNewI, true
+}
+
+func (r *raftLog) findConflict(ents []Entry) uint64 {
+	for _, ent := range ents {
+		if r.matchTerm(ent.Index, ent.Term) {
+			continue
+		}
+
+		return ent.Index
+	}
+	return 0
+}
+
+func (r *raftLog) matchTerm(logIndex, logTerm uint64) bool {
+	t, err := r.term(logIndex)
+	if err != nil {
+		return false
+	}
+	return t == logTerm
+}
