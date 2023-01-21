@@ -11,15 +11,16 @@ type service struct {
 	proposeC    chan<- string
 	confChangeC chan<- raft.ConfChange
 	commitC     <-chan *string
+	kvStore     *kvStore
 }
 
-func newService(proposeC chan<- string, confChangeC chan<- raft.ConfChange, commitC <-chan *string) *service {
+func newService(kvStore *kvStore, proposeC chan<- string, confChangeC chan<- raft.ConfChange, commitC <-chan *string) *service {
 	return &service{
 		proposeC:    proposeC,
 		confChangeC: confChangeC,
 		commitC:     commitC,
+		kvStore:     kvStore,
 	}
-
 }
 
 func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +32,7 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			panic(err)
 		}
-		s.proposeC <- string(v)
+		s.kvStore.Propose(url, string(v))
 
 	case r.Method == http.MethodPost:
 		v, err := io.ReadAll(r.Body)
@@ -53,7 +54,7 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func serveHttoAPI(port int, s *service) {
+func serveHTTPAPI(port int, s *service) {
 	srv := http.Server{
 		Addr:    ":" + strconv.Itoa(port),
 		Handler: s,

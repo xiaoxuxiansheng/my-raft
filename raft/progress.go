@@ -12,3 +12,15 @@ type Progress struct {
 	Match, Next uint64
 	State       ProgressStateType
 }
+
+func (pr *Progress) maybeUpdate(n uint64) bool {
+	var updated bool
+	if pr.Match < n {
+		pr.Match = n
+		updated = true
+	}
+	if pr.Next < n+1 {
+		pr.Next = n + 1
+	}
+	return updated
+}

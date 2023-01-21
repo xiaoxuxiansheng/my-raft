@@ -21,3 +21,9 @@ type readOnly struct {
 	// 读请求队列，元素为读请求标识 id，通过队列记录了读请求的先后顺序
 	readIndexQueue []string
 }
+
+func newReadOnly() *readOnly {
+	return &readOnly{
+		pendingReadIndex: make(map[string]*readIndexStatus),
+	}
+}

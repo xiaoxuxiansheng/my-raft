@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"time"
+
 	"xiaoxuxiansheng/my-raft/raft"
 )
 
@@ -18,6 +19,7 @@ type raftProxy struct {
 	// 节点列表
 	peers []string
 
+	// raft 节点
 	node raft.Node
 
 	// 日志持久化模块
@@ -26,13 +28,13 @@ type raftProxy struct {
 
 func newRaftProxy(id uint64, peers []string, proposeC <-chan string, confChangeC <-chan raft.ConfChange) <-chan *string {
 	commitC := make(chan *string)
-
 	r := raftProxy{
 		proposeC:    proposeC,
 		confChangeC: confChangeC,
 		commitC:     commitC,
 		id:          id,
 		peers:       peers,
+		storage:     raft.NewMemoryStorage(),
 	}
 
 	go r.run()
@@ -40,7 +42,24 @@ func newRaftProxy(id uint64, peers []string, proposeC <-chan string, confChangeC
 }
 
 func (r *raftProxy) run() {
+	peers := make([]raft.Peer, 0, len(r.peers))
+	for i := range r.peers {
+		peers[i] = raft.Peer{ID: uint64(i + 1)}
+	}
 
+	c := raft.Config{
+		ID:           uint64(r.id),
+		ElectionTick: 10,
+		HearbeatTick: 1,
+		Storage:      r.storage,
+	}
+
+	r.node = raft.StartNode(&c, peers)
+
+	// transport 模块启动
+
+	// 监听模块启动
+	go r.listen()
 }
 
 func (r *raftProxy) listen() {
@@ -68,9 +87,7 @@ func (r *raftProxy) listen() {
 			// advance
 			r.node.Advance()
 		}
-
 	}
-
 }
 
 func (r *raftProxy) listenRequest() {

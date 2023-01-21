@@ -1,5 +1,7 @@
 package raft
 
+import "math/rand"
+
 type stepFunc func(*raft, Message)
 
 type raft struct {
@@ -35,10 +37,49 @@ type raft struct {
 	Vote uint64
 	// 是否确认不处于小分区
 	checkQuorum bool
+	// 选举超时 tick
+	electionTimeout int32
+	// 选举超时随机 tick
+	randomizedElectionTimeout int32
+	// 选举 tick 计数器
+	electionElapsed int32
+	// 心跳超时 tick
+	heartbeatTimeout int32
+	// 心跳 tick 计数器
+	heartbeatElapsed int32
 }
 
 func newRaft(conf *Config) *raft {
-	return &raft{}
+
+	// 通过 storage 模块获取配置信息和硬状态
+	// hs, cs, err := conf.Storage.InitialState()
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// 从 conf 中读取配置创建 raft 对象
+	r := raft{
+		id:               conf.ID,
+		lead:             None,
+		raftLog:          newRaftLog(conf.Storage),
+		electionTimeout:  conf.ElectionTick,
+		heartbeatTimeout: conf.HearbeatTick,
+		preVote:          conf.Prevote,
+		readOnly:         newReadOnly(),
+	}
+
+	// 将 peers 添加 prs
+	for _, peer := range conf.peers {
+		r.prs[peer] = &Progress{Next: 1}
+	}
+
+	// 更新 applied 状态
+	r.raftLog.appliedTo(conf.Applied)
+
+	// 启动变为 follower 状态
+	r.becomeFollower(r.Term, None)
+
+	return &r
 }
 
 func (r *raft) Step(m Message) error {
@@ -76,7 +117,7 @@ func (r *raft) Step(m Message) error {
 			break
 		}
 		// 如果还有已提交未应用的配置变更消息，则不能发起投票
-		ents, err := r.raftLog.slice(r.raftLog.applyIndex+1, r.raftLog.commitIndex+1, noLimit)
+		ents, err := r.raftLog.slice(r.raftLog.applyIndex+1, r.raftLog.commitIndex+1)
 		if err != nil {
 			panic(err)
 		}
@@ -120,16 +161,34 @@ func (r *raft) Step(m Message) error {
 	return nil
 }
 
+func (r *raft) becomeLeader() {
+	if r.state == StateFollower {
+		panic("invalid transition [follower -> leader]")
+	}
+	r.step = stepLeader
+	r.reset(r.Term)
+	r.tick = r.tickHeartbeat
+	r.lead = r.id
+	r.state = StateLeader
+
+	// 新上任的 leader 需要传一条空消息
+}
+
 func (r *raft) becomeFollower(term, lead uint64) {
 	r.reset(term)
 	r.step = stepFollower
-	r.tick = tickElection
+	r.tick = r.tickElection
 	r.lead = lead
 	r.state = StateFollower
 }
 
 func (r *raft) reset(term uint64) {
+	// 重置一下选举超时时间
+	r.resetRandomizedElectionTimeout()
+}
 
+func (r *raft) resetRandomizedElectionTimeout() {
+	r.randomizedElectionTimeout = r.electionTimeout + int32(rand.Intn(int(r.electionTimeout)))
 }
 
 func (r *raft) softState() *SoftState {
@@ -163,9 +222,56 @@ func (r *raft) campaign(typ CampaignType) {
 
 }
 
-func tickElection() {
+func (r *raft) tickElection() {
+	r.electionElapsed++
+
+	if r.promotable(r.id) && r.pastElectionTimeout() {
+		r.electionElapsed = 0
+		r.Step(Message{From: r.id, Type: MsgHup})
+	}
+}
+
+func (r *raft) tickHeartbeat() {
+	if r.state != StateLeader {
+		return
+	}
+
+	r.heartbeatElapsed++
+	if r.heartbeatElapsed >= r.heartbeatTimeout {
+		r.heartbeatElapsed = 0
+		r.Step(Message{From: r.id, Type: MsgBeat})
+	}
+}
+
+func stepLeader(r *raft, m Message) {
 
 }
 
 func stepFollower(r *raft, m Message) {
+}
+
+// 校验一个节点是否仍在集群中
+func (r *raft) promotable(id uint64) bool {
+	_, ok := r.prs[id]
+	return ok
+}
+
+func (r *raft) pastElectionTimeout() bool {
+	return r.electionElapsed >= r.randomizedElectionTimeout
+}
+
+func (r *raft) appendEntry(es ...Entry) {
+	lastIndex := r.raftLog.lastIndex()
+	for i := range es {
+		es[i].Term = r.Term
+		es[i].Index = lastIndex + uint64(i) + 1
+	}
+	// 设置新增日志的 term 以及 index
+	r.raftLog.apend(es...)
+	r.prs[r.id].maybeUpdate(r.raftLog.lastIndex())
+
+}
+
+func (r *raft) maybeCommit() bool {
+	return false
 }

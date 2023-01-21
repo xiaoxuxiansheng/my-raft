@@ -17,10 +17,10 @@ const (
 )
 
 type Entry struct {
-	LastTerm  uint64    `json:"lastTerm"`
-	LastIndex uint64    `json:"lastIndex"`
-	Type      EntryType `json:"type"`
-	Data      []byte    `json:"data"`
+	Term  uint64    `json:"term"`
+	Index uint64    `json:"index"`
+	Type  EntryType `json:"type"`
+	Data  []byte    `json:"data"`
 }
 
 type MessageType int32
@@ -126,6 +126,10 @@ type Config struct {
 	Applied uint64
 	// 是否处于预竞选状态
 	Prevote bool
+	// follower 发生选举超时的 tick
+	ElectionTick int32
+	// leader 发送心跳的 tick
+	HearbeatTick int32
 }
 
 type Peer struct {
