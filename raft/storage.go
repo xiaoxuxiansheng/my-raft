@@ -86,7 +86,7 @@ func (m *MemoryStorage) lastIndex() uint64 {
 
 func (m *MemoryStorage) FirstIndex() (uint64, error) {
 	m.Lock()
-	defer m.Lock()
+	defer m.Unlock()
 	return m.firstIndex(), nil
 }
 
